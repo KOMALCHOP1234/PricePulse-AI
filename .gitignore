@@ -1,0 +1,30 @@
+# Python virtual environments
+**/venv/
+**/.venv/
+**/env/
+**/ENV/
+
+# Python cache & build
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/*.egg
+**/build/
+**/dist/
+**/catboost_info/
+
+# Frontend dependencies & builds
+**/node_modules/
+**/frontend/dist/
+**/.oxlintrc.json
+
+# Large dataset files (>100MB exceeds GitHub push limit)
+**/Notebook_Experiments/Data/Airbnb_Data.csv
+
+# Logs & temp files
+**/logs/
+**/*.log
+**/.DS_Store
+**/.env
+**/.idea/
+**/.vscode/
