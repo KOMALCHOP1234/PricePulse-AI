@@ -1,11 +1,10 @@
-numpy
-pandas
+streamlit
+plotly
 scikit-learn
-flask
-pillow
-catboost
-dvc
 catboost
 xgboost
-seaborn
+pandas
+numpy
+flask
+flask-cors
 -e .

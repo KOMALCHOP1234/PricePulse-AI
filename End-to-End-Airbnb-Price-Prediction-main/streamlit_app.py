@@ -146,29 +146,35 @@ PD = dict(paper_bgcolor="#1c1d20", plot_bgcolor="#1c1d20",
 
 MODEL_COLORS = {"Linear Regression": "#6b7280", "XGBoost": "#fc8254", "CatBoost (Selected)": "#22c55e"}
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+ARTIFACTS_DIR = os.path.join(BASE_DIR, "Artifacts")
+
 @st.cache_resource(show_spinner=False)
 def load_all():
     from src.Airbnb.pipelines.Prediction_Pipeline import CustomData, PredictPipeline
     from src.Airbnb.utils.utils import load_object
     import pickle
     pp   = PredictPipeline()
-    prep = load_object("Artifacts/Preprocessor.pkl")
-    cb   = load_object("Artifacts/Model.pkl")
-    lr   = pickle.load(open("Artifacts/LR_Model.pkl",  "rb"))
-    xgb  = pickle.load(open("Artifacts/XGB_Model.pkl", "rb"))
+    prep = load_object(os.path.join(ARTIFACTS_DIR, "Preprocessor.pkl"))
+    cb   = load_object(os.path.join(ARTIFACTS_DIR, "Model.pkl"))
+    lr   = pickle.load(open(os.path.join(ARTIFACTS_DIR, "LR_Model.pkl"),  "rb"))
+    xgb  = pickle.load(open(os.path.join(ARTIFACTS_DIR, "XGB_Model.pkl"), "rb"))
     return pp, CustomData, prep, cb, lr, xgb
 
 @st.cache_data(show_spinner=False)
 def load_data():
-    raw   = pd.read_csv("Artifacts/raw_data.csv")
-    test  = pd.read_csv("Artifacts/test_data.csv")
-    preds = pd.read_csv("Artifacts/model_predictions.csv")
-    comp  = json.load(open("Artifacts/model_comparison.json"))
+    raw   = pd.read_csv(os.path.join(ARTIFACTS_DIR, "raw_data.csv"))
+    test  = pd.read_csv(os.path.join(ARTIFACTS_DIR, "test_data.csv"))
+    preds = pd.read_csv(os.path.join(ARTIFACTS_DIR, "model_predictions.csv"))
+    comp  = json.load(open(os.path.join(ARTIFACTS_DIR, "model_comparison.json")))
     return raw, test, preds, comp
 
 with st.spinner("Loading PricePulse AI..."):
     predict_pipeline, CustomData, preprocessor, catboost, lr_model, xgb_model = load_all()
     raw_df, test_df, preds_df, comp = load_data()
+
 
 # Hero
 st.markdown("""<div class="hero">
