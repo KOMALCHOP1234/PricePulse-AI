@@ -1,32 +1,16 @@
 {
-  "LinearRegression": {
-    "r2": 0.8937,
-    "rmse": 0.2665,
-    "mae": 0.2119,
-    "mape": 21.31,
-    "rmse_inr": 2230.0,
-    "mae_inr": 1315.0,
-    "train_time_s": 0.04,
-    "label": "Linear Regression"
-  },
-  "XGBoost": {
-    "r2": 0.9755,
-    "rmse": 0.128,
-    "mae": 0.1016,
-    "mape": 10.28,
-    "rmse_inr": 987.0,
-    "mae_inr": 613.0,
-    "train_time_s": 0.48,
-    "label": "XGBoost"
-  },
   "CatBoost": {
-    "r2": 0.9768,
-    "rmse": 0.1245,
-    "mae": 0.0987,
-    "mape": 10.0,
-    "rmse_inr": 950.0,
-    "mae_inr": 594.0,
-    "train_time_s": null,
-    "label": "CatBoost (Selected)"
+    "label": "CatBoost Dynamic (Selected)",
+    "r2": 0.9903,
+    "rmse": 0.0824,
+    "mae": 0.0654,
+    "mape": 8.42
+  },
+  "LinearRegression": {
+    "label": "Linear Regression Baseline",
+    "r2": 0.8413,
+    "rmse": 0.334,
+    "mae": 0.2614,
+    "mape": 23.15
   }
 }

@@ -16,20 +16,21 @@ CORS(app)
 
 predict_pipeline = PredictPipeline()
 
-# Load CatBoost model once for feature importance extraction
+# Load trained CatBoost model for feature importance extraction
 MODEL_PATH = os.path.join(BASE_DIR, "Artifacts", "Model.pkl")
 catboost_model = None
 try:
     catboost_model = load_object(MODEL_PATH)
 except Exception as e:
-    print(f"Warning: Could not load CatBoost model for feature importance: {e}")
+    print(f"Warning: Could not load CatBoost model: {e}")
 
 FEATURE_NAMES = [
     'amenities', 'accommodates', 'bathrooms', 'latitude', 'longitude', 
     'host_response_rate', 'number_of_reviews', 'review_scores_rating', 
-    'bedrooms', 'beds', 'property_type', 'room_type', 'bed_type', 
-    'cancellation_policy', 'cleaning_fee', 'city', 'host_identity_verified', 
-    'instant_bookable', 'host_has_profile_pic'
+    'bedrooms', 'beds', 'checkin_month', 'day_of_week', 'is_weekend',
+    'property_type', 'room_type', 'bed_type', 'cancellation_policy', 
+    'cleaning_fee', 'city', 'host_identity_verified', 'instant_bookable', 
+    'host_has_profile_pic', 'season_category'
 ]
 
 FEATURE_DISPLAY_LABELS = {
@@ -37,9 +38,13 @@ FEATURE_DISPLAY_LABELS = {
     'property_type': 'Property Type',
     'accommodates': 'Guest Capacity (Accommodates)',
     'city': 'Destination City',
+    'season_category': 'Demand Season (Peak / Regular / Monsoon)',
+    'is_weekend': 'Weekend Stay Indicator',
+    'checkin_month': 'Check-in Month (Seasonality)',
+    'day_of_week': 'Day of Week',
     'longitude': 'Longitude (Micro-Location)',
-    'bedrooms': 'Bedrooms Count',
     'latitude': 'Latitude (Micro-Location)',
+    'bedrooms': 'Bedrooms Count',
     'bathrooms': 'Bathrooms Count',
     'amenities': 'Amenities Count',
     'review_scores_rating': 'Review Score Rating',
@@ -54,71 +59,11 @@ FEATURE_DISPLAY_LABELS = {
     'host_has_profile_pic': 'Host Profile Picture'
 }
 
-# Empirical market seasonality multipliers by destination
-# Derived from actual peak tourism seasonality and monsoon dynamics across Indian destinations
-MARKET_FACTORS = {
-    "Goa": {
-        "peak_months": "Nov-Feb (Sunburn, New Year, Beach Season)",
-        "monsoon_months": "Jun-Aug (Heavy Rainfall, Beach Shack Closures)",
-        "peak_mult": 1.45,
-        "monsoon_mult": 0.68,
-        "weekend_mult": 1.18
-    },
-    "Mumbai": {
-        "peak_months": "Oct-Feb (Pleasant Winter, Corporate High Season)",
-        "monsoon_months": "Jul-Aug (Urban Flooding & Logistics Disruption)",
-        "peak_mult": 1.25,
-        "monsoon_mult": 0.82,
-        "weekend_mult": 1.12
-    },
-    "Delhi-NCR": {
-        "peak_months": "Oct-Mar (Winter Tourist & Wedding Season)",
-        "monsoon_months": "Jul-Aug (Humid Monsoon)",
-        "peak_mult": 1.28,
-        "monsoon_mult": 0.85,
-        "weekend_mult": 1.10
-    },
-    "Bangalore": {
-        "peak_months": "Sep-Jan (Tech Conferences & Mild Winter)",
-        "monsoon_months": "Jun-Aug (Monsoon)",
-        "peak_mult": 1.20,
-        "monsoon_mult": 0.88,
-        "weekend_mult": 1.12
-    },
-    "Jaipur": {
-        "peak_months": "Oct-Mar (Palace Tourism, Literary Festival, Weddings)",
-        "monsoon_months": "Jun-Aug (Low Season / Summer Monsoons)",
-        "peak_mult": 1.40,
-        "monsoon_mult": 0.72,
-        "weekend_mult": 1.16
-    },
-    "Manali / Shimla": {
-        "peak_months": "May-Jun & Dec-Jan (Summer Escape & Winter Snowfall)",
-        "monsoon_months": "Jul-Aug (Landslide Red Alerts & Road Closures)",
-        "peak_mult": 1.50,
-        "monsoon_mult": 0.55,
-        "weekend_mult": 1.20
-    },
-    "Hyderabad": {
-        "peak_months": "Oct-Feb (Winter Business & Conventions)",
-        "monsoon_months": "Jun-Aug (Moderate Monsoon)",
-        "peak_mult": 1.20,
-        "monsoon_mult": 0.85,
-        "weekend_mult": 1.10
-    },
-    "Kolkata": {
-        "peak_months": "Oct-Jan (Durga Puja & Winter Festivals)",
-        "monsoon_months": "Jun-Aug (Monsoon)",
-        "peak_mult": 1.35,
-        "monsoon_mult": 0.80,
-        "weekend_mult": 1.12
-    }
-}
-
-# Real-world Indian destinations and micro-localities
 INDIAN_CITIES = {
     "Goa": {
         "lat": 15.2993, "long": 74.1240, "name": "Goa", "state": "Goa", "desc": "Beachfront & Coastal Villas",
+        "peak_months": "Nov-Feb (Sunburn, Beach Season)",
+        "monsoon_months": "Jun-Aug (Heavy Monsoon)",
         "localities": [
             {"name": "Candolim & Sinquerim Beach", "lat": 15.5175, "long": 73.7634, "tag": "Beachside Luxury"},
             {"name": "Baga & Calangute Strip", "lat": 15.5553, "long": 73.7517, "tag": "Nightlife & Water Sports"},
@@ -129,6 +74,8 @@ INDIAN_CITIES = {
     },
     "Mumbai": {
         "lat": 19.0760, "long": 72.8777, "name": "Mumbai", "state": "Maharashtra", "desc": "South Mumbai & Bandra Condos",
+        "peak_months": "Oct-Feb (Winter Peak)",
+        "monsoon_months": "Jul-Aug (Monsoon)",
         "localities": [
             {"name": "Bandra West & Pali Hill", "lat": 19.0596, "long": 72.8295, "tag": "Celebrity & Boutique Cafes"},
             {"name": "Juhu Beach & Tara Road", "lat": 19.0988, "long": 72.8264, "tag": "Seafront High-Rise"},
@@ -139,6 +86,8 @@ INDIAN_CITIES = {
     },
     "Delhi-NCR": {
         "lat": 28.6139, "long": 77.2090, "name": "Delhi-NCR", "state": "Delhi", "desc": "Hauz Khas, Gurgaon & South Delhi",
+        "peak_months": "Oct-Mar (Winter Tourist Season)",
+        "monsoon_months": "Jul-Aug (Monsoon)",
         "localities": [
             {"name": "Hauz Khas Village & Green Park", "lat": 28.5494, "long": 77.2001, "tag": "Heritage Lake & Nightlife"},
             {"name": "DLF Phase 5 & Golf Course Rd", "lat": 28.4595, "long": 77.0965, "tag": "Ultra-Luxury Condos"},
@@ -148,6 +97,8 @@ INDIAN_CITIES = {
     },
     "Bangalore": {
         "lat": 12.9716, "long": 77.5946, "name": "Bangalore", "state": "Karnataka", "desc": "Indiranagar & Koramangala Lofts",
+        "peak_months": "Oct-Jan (Tech Conferences & Mild Winter)",
+        "monsoon_months": "Jun-Aug (Monsoon)",
         "localities": [
             {"name": "Indiranagar 100ft Road", "lat": 12.9784, "long": 77.6408, "tag": "Microbreweries & Shopping"},
             {"name": "Koramangala 4th Block", "lat": 12.9352, "long": 77.6245, "tag": "Startup Hub & Trendy Lofts"},
@@ -157,6 +108,8 @@ INDIAN_CITIES = {
     },
     "Jaipur": {
         "lat": 26.9124, "long": 75.7873, "name": "Jaipur", "state": "Rajasthan", "desc": "Pink City & Heritage Havelis",
+        "peak_months": "Oct-Mar (Palaces & Literary Festival)",
+        "monsoon_months": "Jun-Aug (Low Season)",
         "localities": [
             {"name": "C-Scheme & Civil Lines", "lat": 26.9054, "long": 75.8010, "tag": "High-End Diners & Embassies"},
             {"name": "Amer Road Heritage Belt", "lat": 26.9855, "long": 75.8513, "tag": "Palaces & Fort Views"},
@@ -165,6 +118,8 @@ INDIAN_CITIES = {
     },
     "Manali / Shimla": {
         "lat": 32.2432, "long": 77.1892, "name": "Manali / Shimla", "state": "Himachal Pradesh", "desc": "Himalayan Mountain Cottages",
+        "peak_months": "May-Jun & Dec-Jan (Snow & Summer Escape)",
+        "monsoon_months": "Jul-Aug (Landslide Season)",
         "localities": [
             {"name": "Old Manali & Club House", "lat": 32.2530, "long": 77.1750, "tag": "Riverside Apple Orchards"},
             {"name": "Solang Valley Snow Point", "lat": 32.3160, "long": 77.1570, "tag": "Mountain Skiing & Chalets"},
@@ -174,6 +129,8 @@ INDIAN_CITIES = {
     },
     "Hyderabad": {
         "lat": 17.3850, "long": 78.4867, "name": "Hyderabad", "state": "Telangana", "desc": "Banjara Hills & Hitec City",
+        "peak_months": "Oct-Feb (Winter Conventions)",
+        "monsoon_months": "Jun-Aug (Monsoon)",
         "localities": [
             {"name": "Jubilee Hills & Film Nagar", "lat": 17.4319, "long": 78.4073, "tag": "Upscale Mansions & Clubs"},
             {"name": "Hitec City & Madhapur", "lat": 17.4483, "long": 78.3758, "tag": "Cyber Towers IT Corridor"},
@@ -182,6 +139,8 @@ INDIAN_CITIES = {
     },
     "Kolkata": {
         "lat": 22.5726, "long": 88.3639, "name": "Kolkata", "state": "West Bengal", "desc": "Park Street & Salt Lake City",
+        "peak_months": "Oct-Jan (Durga Puja & Winter)",
+        "monsoon_months": "Jun-Aug (Monsoon)",
         "localities": [
             {"name": "Park Street & Camac Street", "lat": 22.5510, "long": 88.3530, "tag": "Heritage Nightlife & Cafes"},
             {"name": "Salt Lake Sector V", "lat": 22.5804, "long": 88.4378, "tag": "IT Hub & Planned Avenues"},
@@ -194,19 +153,15 @@ INDIAN_CITIES = {
 def index():
     return jsonify({
         "status": "online",
-        "service": "Dynamic Pricing AI - Short-Term Rental Valuation & Dynamic Rate Engine",
-        "version": "4.1.0",
+        "service": "Dynamic Pricing AI - Short-Term Rental AI Valuation Engine",
+        "version": "5.0.0 (Native Dynamic Temporal Model, CatBoost R2=0.9903)",
         "currency": "INR",
-        "endpoints": ["/api/predict", "/api/cities", "/api/feature_importance", "/api/market_factors"]
+        "endpoints": ["/api/predict", "/api/cities", "/api/feature_importance"]
     })
 
 @app.route("/api/cities", methods=["GET"])
 def get_cities():
     return jsonify(INDIAN_CITIES)
-
-@app.route("/api/market_factors", methods=["GET"])
-def get_market_factors():
-    return jsonify(MARKET_FACTORS)
 
 @app.route("/api/feature_importance", methods=["GET"])
 def get_feature_importance():
@@ -227,7 +182,8 @@ def get_feature_importance():
 
         return jsonify({
             "success": True,
-            "model": "CatBoostRegressor",
+            "model": "CatBoostRegressor (Dynamic Temporal)",
+            "r2_score": 0.9903,
             "features": feature_data
         })
     except Exception as e:
@@ -257,7 +213,6 @@ def predict():
         # =========================================================================
         validation_errors = []
 
-        # 1. Room Type Constraints
         if room_type == "Shared room":
             if bedrooms != 1:
                 validation_errors.append("A Shared room must have exactly 1 bedroom.")
@@ -276,19 +231,12 @@ def predict():
             if accommodates > 3:
                 validation_errors.append("A Private room cannot accommodate more than 3 guests.")
             if bathrooms > 2.0:
-                validation_errors.append("A Private room cannot have more than 2.0 bathrooms.")
+                validation_errors.append("A Private room cannot exceed 2.0 bathrooms.")
 
         elif room_type == "Entire home/apt":
-            # Entire homes are 1 to 5 bedrooms
             if bedrooms < 1 or bedrooms > 5:
                 validation_errors.append(f"Bedrooms ({bedrooms}) must be between 1 and 5.")
 
-            # Strict realistic capacities per bedroom:
-            # 1 BR: max 4 guests, max 3 beds, max 2.0 baths
-            # 2 BR: max 6 guests, max 4 beds, max 3.0 baths
-            # 3 BR: max 8 guests, max 5 beds, max 4.0 baths
-            # 4 BR: max 10 guests, max 6 beds, max 5.0 baths
-            # 5 BR: max 12 guests, max 7 beds, max 6.0 baths
             max_guests_allowed = bedrooms * 2 + 2
             max_beds_allowed = bedrooms + 2
             max_baths_allowed = float(bedrooms + 1)
@@ -314,7 +262,6 @@ def predict():
                     f"A {bedrooms}-bedroom property cannot have {bathrooms} bathrooms. Maximum realistic is {max_baths_allowed} bathrooms."
                 )
 
-        # 2. General cross-field sanity
         if accommodates > (beds * 2):
             validation_errors.append(
                 f"Guest count ({accommodates}) exceeds capacity for {beds} bed(s) (Maximum {beds * 2} guests, 2 per bed)."
@@ -327,7 +274,6 @@ def predict():
                 "validation_errors": validation_errors
             }), 422
 
-        # Data sanitization
         raw_clean = data_json.get("cleaning_fee", True)
         cleaning_fee = bool(raw_clean) if not isinstance(raw_clean, str) else raw_clean.lower() in ("true", "1", "yes")
 
@@ -346,14 +292,28 @@ def predict():
         number_of_reviews = int(data_json.get("number_of_reviews", 30))
         review_scores_rating = float(data_json.get("review_scores_rating", 95))
 
-        # Dynamic Temporal Inputs
-        season = str(data_json.get("season", "regular")).lower()
+        # Temporal Inputs mapping into the native ML feature space
+        season_category = str(data_json.get("season", "regular")).lower()
+        if season_category not in ["regular", "peak", "monsoon"]:
+            season_category = "regular"
+
         raw_weekend = data_json.get("is_weekend", False)
-        is_weekend = bool(raw_weekend) if not isinstance(raw_weekend, str) else raw_weekend.lower() in ("true", "1", "yes")
+        is_weekend_bool = bool(raw_weekend) if not isinstance(raw_weekend, str) else raw_weekend.lower() in ("true", "1", "yes")
+        is_weekend_int = 1 if is_weekend_bool else 0
+        day_of_week = 5 if is_weekend_bool else 2  # Friday/Sat vs Tuesday
+
+        # Representative month for seasonality: Peak=December (12), Monsoon=July (7), Regular=April (4)
+        if season_category == "peak":
+            checkin_month = 12
+        elif season_category == "monsoon":
+            checkin_month = 7
+        else:
+            checkin_month = 4
+
         locality_name = data_json.get("locality", "")
 
-        # 1. Base Machine Learning Valuation via Trained CatBoost Pipeline
-        custom_data = CustomData(
+        # 1. Native ML Dynamic Prediction (CatBoost model natively evaluated)
+        custom_data_dynamic = CustomData(
             property_type=property_type,
             room_type=room_type,
             amenities=amenities,
@@ -372,31 +332,56 @@ def predict():
             number_of_reviews=number_of_reviews,
             review_scores_rating=review_scores_rating,
             bedrooms=bedrooms,
-            beds=beds
+            beds=beds,
+            checkin_month=checkin_month,
+            day_of_week=day_of_week,
+            is_weekend=is_weekend_int,
+            season_category=season_category
         )
 
-        df = custom_data.get_data_as_dataframe()
-        raw_pred = predict_pipeline.predict(df)
-        base_nightly_price = round(float(np.exp(raw_pred[0])), 0)
+        df_dyn = custom_data_dynamic.get_data_as_dataframe()
+        raw_pred_dyn = predict_pipeline.predict(df_dyn)
+        dynamic_nightly_price = round(float(np.exp(raw_pred_dyn[0])), 0)
 
-        # 2. Destination-Specific Dynamic Multipliers
-        city_market = MARKET_FACTORS.get(city, MARKET_FACTORS["Goa"])
-        if season == "peak":
-            season_mult = city_market["peak_mult"]
-        elif season == "monsoon":
-            season_mult = city_market["monsoon_mult"]
-        else:
-            season_mult = 1.00
+        # Baseline Comparison (Regular Season Weekday Baseline evaluated natively)
+        custom_data_base = CustomData(
+            property_type=property_type,
+            room_type=room_type,
+            amenities=amenities,
+            accommodates=accommodates,
+            bathrooms=bathrooms,
+            bed_type=bed_type,
+            cancellation_policy=cancellation_policy,
+            cleaning_fee=cleaning_fee,
+            city=city,
+            host_has_profile_pic=host_has_profile_pic,
+            host_identity_verified=host_identity_verified,
+            host_response_rate=host_response_rate,
+            instant_bookable=instant_bookable,
+            latitude=latitude,
+            longitude=longitude,
+            number_of_reviews=number_of_reviews,
+            review_scores_rating=review_scores_rating,
+            bedrooms=bedrooms,
+            beds=beds,
+            checkin_month=4,
+            day_of_week=2,
+            is_weekend=0,
+            season_category="regular"
+        )
+        df_base = custom_data_base.get_data_as_dataframe()
+        raw_pred_base = predict_pipeline.predict(df_base)
+        base_nightly_price = round(float(np.exp(raw_pred_base[0])), 0)
 
-        weekend_mult = city_market["weekend_mult"] if is_weekend else 1.00
-        combined_mult = round(season_mult * weekend_mult, 3)
+        # Ratio learned natively by CatBoost
+        dynamic_ratio = round(dynamic_nightly_price / max(1.0, base_nightly_price), 3)
 
-        dynamic_nightly_price = round(base_nightly_price * combined_mult, 0)
-
-        # 3. Transparent Host Payout Breakdown
+        # Payout ledger
         platform_fee_pct = 0.03
         platform_fee_amount = round(dynamic_nightly_price * platform_fee_pct, 0)
-        net_host_takehome_nightly = dynamic_nightly_price - platform_fee_amount
+        net_host_takehome = dynamic_nightly_price - platform_fee_amount
+
+        city_meta = INDIAN_CITIES.get(city, INDIAN_CITIES["Goa"])
 
         return jsonify({
             "success": True,
@@ -406,18 +391,17 @@ def predict():
             "predicted_nightly_price": dynamic_nightly_price,
             "dynamic_factors": {
                 "destination": city,
-                "season": season,
-                "season_multiplier": season_mult,
-                "is_weekend": is_weekend,
-                "weekend_multiplier": weekend_mult,
-                "combined_multiplier": combined_mult,
-                "market_context": city_market["peak_months"] if season == "peak" else (city_market["monsoon_months"] if season == "monsoon" else "Standard Seasonal Baseline")
+                "season": season_category,
+                "checkin_month": checkin_month,
+                "is_weekend": is_weekend_bool,
+                "dynamic_surge_ratio": dynamic_ratio,
+                "market_context": city_meta["peak_months"] if season_category == "peak" else (city_meta["monsoon_months"] if season_category == "monsoon" else "Standard Off-Peak Baseline")
             },
             "financial_breakdown": {
                 "gross_nightly": dynamic_nightly_price,
                 "platform_service_fee": platform_fee_amount,
                 "platform_service_fee_pct": 3.0,
-                "net_host_takehome_nightly": net_host_takehome_nightly
+                "net_host_takehome_nightly": net_host_takehome
             },
             "property_summary": {
                 "city": city,

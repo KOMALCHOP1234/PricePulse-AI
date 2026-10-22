@@ -21,17 +21,19 @@ class DataTransformation:
 
     def get_data_transformation(self):
         try:
-            logging.info('Data Transformation initiated for India model')
+            logging.info('Data Transformation initiated for dynamic rental pricing model')
 
+            # 13 numerical columns (including temporal features checkin_month, day_of_week, is_weekend)
             numerical_cols = [
                 'amenities', 'accommodates', 'bathrooms', 'latitude', 'longitude', 
                 'host_response_rate', 'number_of_reviews', 'review_scores_rating', 
-                'bedrooms', 'beds'
+                'bedrooms', 'beds', 'checkin_month', 'day_of_week', 'is_weekend'
             ]
+            # 10 categorical columns (including season_category)
             categorical_cols = [
                 'property_type', 'room_type', 'bed_type', 'cancellation_policy', 
                 'cleaning_fee', 'city', 'host_identity_verified', 'instant_bookable', 
-                'host_has_profile_pic'
+                'host_has_profile_pic', 'season_category'
             ]
 
             property_type_cat = [
@@ -47,6 +49,7 @@ class DataTransformation:
             host_has_profile_pic_cat = ['t', 'f']
             host_identity_verified_cat = ['t', 'f']
             instant_bookable_cat = ['t', 'f']
+            season_category_cat = ['regular', 'peak', 'monsoon']
 
             num_pipeline = Pipeline(steps=[
                 ('imputer', SimpleImputer(strategy='median')),
@@ -65,7 +68,8 @@ class DataTransformation:
                         city_cat, 
                         host_identity_verified_cat, 
                         instant_bookable_cat,
-                        host_has_profile_pic_cat
+                        host_has_profile_pic_cat,
+                        season_category_cat
                     ],
                     handle_unknown='use_encoded_value',
                     unknown_value=-1
@@ -124,9 +128,9 @@ class DataTransformation:
                 obj=preprocessing_obj
             )
 
-            logging.info("Indian Preprocessor pickle file saved successfully.")
+            logging.info("Dynamic Rental Preprocessor pickle file saved successfully.")
             return train_arr, test_arr
 
         except Exception as e:
-            logging.info("Exception occurred in Indian data transformation")
+            logging.info("Exception occurred in dynamic data transformation")
             raise customexception(e, sys)

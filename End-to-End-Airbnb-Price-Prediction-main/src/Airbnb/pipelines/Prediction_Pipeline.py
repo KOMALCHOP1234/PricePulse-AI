@@ -1,16 +1,15 @@
 import os
-import numpy as np
 import sys
+import numpy as np
 import pandas as pd
 from src.Airbnb.logger import logging
 from src.Airbnb.utils.utils import load_object
 from src.Airbnb.exception import customexception
 
-
 class PredictPipeline:
     def __init__(self):
         pass
-    
+
     def predict(self, features):
         try:
             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -33,22 +32,26 @@ class CustomData:
                  room_type: str,
                  amenities: int,
                  accommodates: int,
-                 bathrooms: int,
+                 bathrooms: float,
                  bed_type: str,
                  cancellation_policy: str,
-                 cleaning_fee: float,
+                 cleaning_fee: bool,
                  city: str,
                  host_has_profile_pic: str,
                  host_identity_verified: str,
-                 host_response_rate: str,
+                 host_response_rate: float,
                  instant_bookable: str,
                  latitude: float,
                  longitude: float,
                  number_of_reviews: int,
-                 review_scores_rating: int,
+                 review_scores_rating: float,
                  bedrooms: int,
-                 beds: int):
-        
+                 beds: int,
+                 checkin_month: int = 12,
+                 day_of_week: int = 5,
+                 is_weekend: int = 1,
+                 season_category: str = "peak"):
+
         self.property_type = property_type
         self.room_type = room_type
         self.amenities = amenities
@@ -68,6 +71,10 @@ class CustomData:
         self.review_scores_rating = review_scores_rating
         self.bedrooms = bedrooms
         self.beds = beds
+        self.checkin_month = checkin_month
+        self.day_of_week = day_of_week
+        self.is_weekend = is_weekend
+        self.season_category = season_category
 
     def get_data_as_dataframe(self):
         try:
@@ -90,7 +97,11 @@ class CustomData:
                 'number_of_reviews': [self.number_of_reviews],
                 'review_scores_rating': [self.review_scores_rating],
                 'bedrooms': [self.bedrooms],
-                'beds': [self.beds]
+                'beds': [self.beds],
+                'checkin_month': [self.checkin_month],
+                'day_of_week': [self.day_of_week],
+                'is_weekend': [self.is_weekend],
+                'season_category': [self.season_category]
             }
             df = pd.DataFrame(custom_data_input_dict)
             logging.info('Dataframe Gathered')
