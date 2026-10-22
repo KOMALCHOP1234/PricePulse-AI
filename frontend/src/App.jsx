@@ -299,14 +299,39 @@ export default function App() {
 
   // Client-side physical threshold validation
   const validateForm = () => {
-    if (formData.accommodates > (formData.beds * 2)) {
-      return `Capacity check: ${formData.accommodates} guests exceeds maximum capacity for ${formData.beds} bed(s) (Max ${formData.beds * 2} guests).`;
+    const { room_type, bedrooms, beds, accommodates, bathrooms } = formData;
+
+    if (room_type === "Shared room") {
+      if (bedrooms !== 1) return "A Shared room must have exactly 1 bedroom.";
+      if (beds > 1) return "A Shared room booking corresponds to 1 bed.";
+      if (accommodates > 1) return "A Shared room listing corresponds to 1 guest capacity.";
+      if (bathrooms > 1.0) return "A Shared room cannot exceed 1.0 bathroom.";
+    } else if (room_type === "Private room") {
+      if (bedrooms !== 1) return "A Private room listing must have exactly 1 private bedroom.";
+      if (beds > 2) return "A Private room cannot have more than 2 beds (single/double).";
+      if (accommodates > 3) return "A Private room cannot accommodate more than 3 guests.";
+      if (bathrooms > 2.0) return "A Private room cannot exceed 2.0 bathrooms.";
+    } else {
+      if (bedrooms < 1 || bedrooms > 5) return "Bedrooms must be between 1 and 5 for accurate ML estimation.";
+      const maxGuests = bedrooms * 2 + 2;
+      const maxBeds = bedrooms + 2;
+      const maxBaths = bedrooms + 1;
+      if (accommodates > maxGuests) {
+        return `A ${bedrooms}-bedroom property cannot realistically accommodate ${accommodates} guests (Max ${maxGuests} guests).`;
+      }
+      if (beds > maxBeds) {
+        return `A ${bedrooms}-bedroom property cannot have ${beds} beds (Max ${maxBeds} beds).`;
+      }
+      if (beds < bedrooms) {
+        return `Number of beds (${beds}) cannot be less than number of bedrooms (${bedrooms}).`;
+      }
+      if (bathrooms > maxBaths) {
+        return `A ${bedrooms}-bedroom property cannot have ${bathrooms} bathrooms (Max ${maxBaths} baths).`;
+      }
     }
-    if (formData.bedrooms > 0 && formData.beds < formData.bedrooms) {
-      return `Configuration check: Beds (${formData.beds}) cannot be less than bedrooms (${formData.bedrooms}).`;
-    }
-    if (formData.bathrooms > (formData.bedrooms + 2)) {
-      return `Sanity check: Bathrooms (${formData.bathrooms}) is unusually high for ${formData.bedrooms} bedroom(s).`;
+
+    if (accommodates > (beds * 2)) {
+      return `Capacity check: ${accommodates} guests exceeds maximum capacity for ${beds} bed(s) (Max ${beds * 2} guests, 2 per bed).`;
     }
     return null;
   };
@@ -331,24 +356,21 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
+        const dyn = data.dynamic_factors || {};
+        const gross = data.predicted_nightly_price;
+        const fee = data.financial_breakdown?.platform_service_fee || Math.round(gross * 0.03);
+        const net = data.financial_breakdown?.net_host_takehome_nightly || (gross - fee);
         setPrediction({
-          nightly: data.predicted_nightly_price,
-          base_nightly: data.base_nightly_price || Math.round(data.predicted_nightly_price / (data.combined_multiplier || 1)),
-          weekly: data.weekly_estimate,
-          monthly: data.monthly_estimate,
-          cleaning: data.cleaning_fee_suggested,
-          service_fee: data.financial_breakdown?.airbnb_service_fee_3pct || Math.round(data.predicted_nightly_price * 0.03),
-          net_takehome: data.financial_breakdown?.net_host_takehome_nightly || (data.predicted_nightly_price - Math.round(data.predicted_nightly_price * 0.03)),
-          occupancy_pct: data.financial_breakdown?.expected_occupancy_pct || 75,
-          demand_tier: data.demand_tier || "⭐ High-Demand Sweet Spot",
-          market_range: data.market_range || {
-            budget: Math.round(data.predicted_nightly_price * 0.85),
-            recommended: data.predicted_nightly_price,
-            premium: Math.round(data.predicted_nightly_price * 1.22)
-          },
-          season_mult: data.season_multiplier || 1.0,
-          weekend_mult: data.weekend_multiplier || 1.0,
-          combined_mult: data.combined_multiplier || 1.0
+          nightly: gross,
+          base_nightly: data.base_nightly_price || gross,
+          service_fee: fee,
+          net_takehome: net,
+          cleaning: Math.round(gross * 0.08),
+          season_mult: dyn.season_multiplier || 1.0,
+          weekend_mult: dyn.weekend_multiplier || 1.0,
+          combined_mult: dyn.combined_multiplier || 1.0,
+          market_context: dyn.market_context || "",
+          demand_tier: gross > 18000 ? "💎 Luxury Estate" : (gross > 9000 ? "🔥 High-Demand Prime" : "⭐ Standard Market Tier")
         });
 
         confetti({
@@ -368,8 +390,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    runPrediction();
-
     // Fetch real CatBoost model feature importances from Flask API
     fetch("http://127.0.0.1:5000/api/feature_importance")
       .then(res => res.json())
@@ -380,6 +400,23 @@ export default function App() {
       })
       .catch(err => console.log("Feature importance API offline:", err));
   }, []);
+
+  // Re-run dynamic price prediction whenever property specs or dynamic season factors change
+  useEffect(() => {
+    runPrediction();
+  }, [
+    formData.city,
+    formData.locality,
+    formData.property_type,
+    formData.room_type,
+    formData.season,
+    formData.is_weekend,
+    formData.bedrooms,
+    formData.beds,
+    formData.accommodates,
+    formData.bathrooms,
+    formData.amenities
+  ]);
 
   const currentCityData = INDIAN_CITIES[formData.city] || INDIAN_CITIES["Goa"];
 
@@ -599,62 +636,83 @@ export default function App() {
                           Capacity Configuration
                         </label>
                         <div className="input-row">
+                          {/* Bedrooms */}
+                          <div className="counter-box">
+                            <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>Bedrooms</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <button 
+                                type="button" className="counter-btn" disabled={formData.bedrooms <= (formData.room_type === 'Entire home/apt' ? 1 : 1)}
+                                onClick={() => {
+                                  const newBr = Math.max(1, formData.bedrooms - 1);
+                                  setFormData(p => ({
+                                    ...p,
+                                    bedrooms: newBr,
+                                    beds: Math.min(p.beds, newBr + 2),
+                                    accommodates: Math.min(p.accommodates, newBr * 2 + 2),
+                                    bathrooms: Math.min(p.bathrooms, newBr + 1)
+                                  }));
+                                }}
+                              >-</button>
+                              <span className="counter-val">{formData.bedrooms}</span>
+                              <button 
+                                type="button" className="counter-btn" disabled={formData.room_type !== 'Entire home/apt' || formData.bedrooms >= 5}
+                                onClick={() => {
+                                  const newBr = Math.min(5, formData.bedrooms + 1);
+                                  setFormData(p => ({
+                                    ...p,
+                                    bedrooms: newBr,
+                                    beds: Math.max(p.beds, newBr),
+                                    accommodates: Math.max(p.accommodates, newBr * 2)
+                                  }));
+                                }}
+                              >+</button>
+                            </div>
+                          </div>
+
+                          {/* Beds (Bounded by Bedrooms) */}
+                          <div className="counter-box">
+                            <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>Beds</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <button 
+                                type="button" className="counter-btn" disabled={formData.beds <= formData.bedrooms}
+                                onClick={() => setFormData(p => ({ ...p, beds: Math.max(p.bedrooms, p.beds - 1) }))}
+                              >-</button>
+                              <span className="counter-val">{formData.beds}</span>
+                              <button 
+                                type="button" className="counter-btn" disabled={formData.beds >= (formData.bedrooms + 2)}
+                                onClick={() => setFormData(p => ({ ...p, beds: Math.min(p.bedrooms + 2, p.beds + 1) }))}
+                              >+</button>
+                            </div>
+                          </div>
+
+                          {/* Guests (Bounded by Bedrooms * 2 + 2) */}
                           <div className="counter-box">
                             <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>Guests</span>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <button 
                                 type="button" className="counter-btn" disabled={formData.accommodates <= 1}
-                                onClick={() => setFormData(p => ({ ...p, accommodates: p.accommodates - 1 }))}
+                                onClick={() => setFormData(p => ({ ...p, accommodates: Math.max(1, p.accommodates - 1) }))}
                               >-</button>
                               <span className="counter-val">{formData.accommodates}</span>
                               <button 
-                                type="button" className="counter-btn" disabled={formData.accommodates >= 16}
-                                onClick={() => setFormData(p => ({ ...p, accommodates: p.accommodates + 1 }))}
+                                type="button" className="counter-btn" disabled={formData.accommodates >= (formData.bedrooms * 2 + 2)}
+                                onClick={() => setFormData(p => ({ ...p, accommodates: Math.min(formData.bedrooms * 2 + 2, p.accommodates + 1) }))}
                               >+</button>
                             </div>
                           </div>
 
-                          <div className="counter-box">
-                            <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>Bedrooms</span>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <button 
-                                type="button" className="counter-btn" disabled={formData.bedrooms <= 0}
-                                onClick={() => setFormData(p => ({ ...p, bedrooms: p.bedrooms - 1 }))}
-                              >-</button>
-                              <span className="counter-val">{formData.bedrooms}</span>
-                              <button 
-                                type="button" className="counter-btn" disabled={formData.bedrooms >= 10}
-                                onClick={() => setFormData(p => ({ ...p, bedrooms: p.bedrooms + 1 }))}
-                              >+</button>
-                            </div>
-                          </div>
-
-                          <div className="counter-box">
-                            <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>Beds</span>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <button 
-                                type="button" className="counter-btn" disabled={formData.beds <= 1}
-                                onClick={() => setFormData(p => ({ ...p, beds: p.beds - 1 }))}
-                              >-</button>
-                              <span className="counter-val">{formData.beds}</span>
-                              <button 
-                                type="button" className="counter-btn" disabled={formData.beds >= 16}
-                                onClick={() => setFormData(p => ({ ...p, beds: p.beds + 1 }))}
-                              >+</button>
-                            </div>
-                          </div>
-
+                          {/* Bathrooms (Bounded by Bedrooms + 1) */}
                           <div className="counter-box">
                             <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>Bathrooms</span>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <button 
-                                type="button" className="counter-btn" disabled={formData.bathrooms <= 1}
-                                onClick={() => setFormData(p => ({ ...p, bathrooms: Math.max(1, p.bathrooms - 1) }))}
+                                type="button" className="counter-btn" disabled={formData.bathrooms <= 1.0}
+                                onClick={() => setFormData(p => ({ ...p, bathrooms: Math.max(1.0, p.bathrooms - 0.5) }))}
                               >-</button>
                               <span className="counter-val">{formData.bathrooms}</span>
                               <button 
-                                type="button" className="counter-btn" disabled={formData.bathrooms >= 8}
-                                onClick={() => setFormData(p => ({ ...p, bathrooms: p.bathrooms + 1 }))}
+                                type="button" className="counter-btn" disabled={formData.bathrooms >= (formData.bedrooms + 1)}
+                                onClick={() => setFormData(p => ({ ...p, bathrooms: Math.min(formData.bedrooms + 1, p.bathrooms + 0.5) }))}
                               >+</button>
                             </div>
                           </div>
