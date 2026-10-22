@@ -1,15 +1,81 @@
 import os
+import sys
 import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 from src.Airbnb.pipelines.Prediction_Pipeline import CustomData, PredictPipeline
+from src.Airbnb.utils.utils import load_object
 
 app = Flask(__name__)
 CORS(app)
 
 predict_pipeline = PredictPipeline()
 
-# Realistic Indian tourism & metropolitan centers with high-demand micro-localities
+# Load CatBoost model once for feature importance extraction
+MODEL_PATH = os.path.join(BASE_DIR, "Artifacts", "Model.pkl")
+catboost_model = None
+try:
+    catboost_model = load_object(MODEL_PATH)
+except Exception as e:
+    print(f"Warning: Could not load CatBoost model for feature importance: {e}")
+
+# Exact 19 feature columns used in the preprocessing pipeline
+FEATURE_NAMES = [
+    'amenities', 'accommodates', 'bathrooms', 'latitude', 'longitude', 
+    'host_response_rate', 'number_of_reviews', 'review_scores_rating', 
+    'bedrooms', 'beds', 'property_type', 'room_type', 'bed_type', 
+    'cancellation_policy', 'cleaning_fee', 'city', 'host_identity_verified', 
+    'instant_bookable', 'host_has_profile_pic'
+]
+
+FEATURE_DISPLAY_LABELS = {
+    'room_type': 'Room Type (Entire vs Private/Shared)',
+    'property_type': 'Property Type',
+    'accommodates': 'Guest Capacity (Accommodates)',
+    'city': 'Destination City',
+    'longitude': 'Longitude (Micro-Location)',
+    'bedrooms': 'Bedrooms Count',
+    'latitude': 'Latitude (Micro-Location)',
+    'bathrooms': 'Bathrooms Count',
+    'amenities': 'Amenities Count',
+    'review_scores_rating': 'Review Score Rating',
+    'beds': 'Beds Count',
+    'number_of_reviews': 'Number of Reviews',
+    'instant_bookable': 'Instant Bookable Flag',
+    'host_identity_verified': 'Host Identity Verified',
+    'host_response_rate': 'Host Response Rate (%)',
+    'cancellation_policy': 'Cancellation Policy',
+    'bed_type': 'Bed Type',
+    'cleaning_fee': 'Cleaning Fee Required',
+    'host_has_profile_pic': 'Host Profile Picture'
+}
+
+# Physical bounds and constraints per property type
+PROPERTY_CONSTRAINTS = {
+    "Shared room": {"max_guests": 4, "max_beds": 4, "max_bedrooms": 1, "max_baths": 2.0},
+    "Private room": {"max_guests": 4, "max_beds": 3, "max_bedrooms": 1, "max_baths": 2.0},
+    "Apartment": {"max_guests": 12, "max_beds": 10, "max_bedrooms": 5, "max_baths": 6.0},
+    "House": {"max_guests": 16, "max_beds": 14, "max_bedrooms": 8, "max_baths": 8.0},
+    "Condominium": {"max_guests": 10, "max_beds": 8, "max_bedrooms": 4, "max_baths": 4.0},
+    "Villa": {"max_guests": 24, "max_beds": 20, "max_bedrooms": 10, "max_baths": 12.0},
+    "Bungalow": {"max_guests": 14, "max_beds": 12, "max_bedrooms": 6, "max_baths": 6.0},
+    "Heritage Haveli": {"max_guests": 30, "max_beds": 25, "max_bedrooms": 15, "max_baths": 16.0},
+    "Cabin / Chalet": {"max_guests": 10, "max_beds": 8, "max_bedrooms": 4, "max_baths": 4.0},
+    "Cottage": {"max_guests": 8, "max_beds": 6, "max_bedrooms": 3, "max_baths": 3.0},
+    "Loft": {"max_guests": 6, "max_beds": 4, "max_bedrooms": 2, "max_baths": 2.0},
+    "Guesthouse": {"max_guests": 8, "max_beds": 6, "max_bedrooms": 3, "max_baths": 3.0},
+    "Serviced apartment": {"max_guests": 10, "max_beds": 8, "max_bedrooms": 4, "max_baths": 4.0},
+    "Townhouse": {"max_guests": 12, "max_beds": 10, "max_bedrooms": 5, "max_baths": 5.0},
+    "Bed & Breakfast": {"max_guests": 6, "max_beds": 4, "max_bedrooms": 2, "max_baths": 2.0},
+    "Resort / Cottage": {"max_guests": 16, "max_beds": 14, "max_bedrooms": 8, "max_baths": 8.0}
+}
+
+# Indian destinations and micro-localities
 INDIAN_CITIES = {
     "Goa": {
         "lat": 15.2993, "long": 74.1240, "name": "Goa", "state": "Goa", "desc": "Beachfront & Coastal Villas",
@@ -88,55 +154,134 @@ INDIAN_CITIES = {
 def index():
     return jsonify({
         "status": "online",
-        "service": "PricePulse AI - Airbnb India Price Prediction API",
-        "version": "3.2.0 (Dynamic Seasonality & Market Intelligence)",
+        "service": "Dynamic Pricing AI - Short-Term & Vacation Rental Pricing Engine",
+        "version": "4.0.0 (Validated Production Engine)",
         "currency": "INR",
-        "endpoints": ["/api/predict", "/api/cities"]
+        "endpoints": ["/api/predict", "/api/cities", "/api/feature_importance", "/api/property_constraints"]
     })
 
 @app.route("/api/cities", methods=["GET"])
 def get_cities():
     return jsonify(INDIAN_CITIES)
 
+@app.route("/api/property_constraints", methods=["GET"])
+def get_property_constraints():
+    return jsonify(PROPERTY_CONSTRAINTS)
+
+@app.route("/api/feature_importance", methods=["GET"])
+def get_feature_importance():
+    try:
+        if catboost_model is None or not hasattr(catboost_model, "feature_importances_"):
+            return jsonify({"success": False, "error": "Model not loaded"}), 500
+
+        importances = catboost_model.feature_importances_
+        feature_data = []
+        for name, score in zip(FEATURE_NAMES, importances):
+            feature_data.append({
+                "feature": name,
+                "label": FEATURE_DISPLAY_LABELS.get(name, name),
+                "importance": round(float(score), 3)
+            })
+
+        # Sort descending by importance
+        feature_data.sort(key=lambda x: x["importance"], reverse=True)
+
+        return jsonify({
+            "success": True,
+            "model": "CatBoostRegressor",
+            "features": feature_data
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route("/api/predict", methods=["POST"])
 def predict():
     try:
         data_json = request.get_json(force=True, silent=False) or {}
-        
+
         city = data_json.get("city", "Goa")
         default_coords = INDIAN_CITIES.get(city, INDIAN_CITIES["Goa"])
-        
+
         property_type = data_json.get("property_type", "Villa")
         room_type = data_json.get("room_type", "Entire home/apt")
-        amenities = int(data_json.get("amenities", 20))
         accommodates = int(data_json.get("accommodates", 4))
+        bedrooms = int(data_json.get("bedrooms", 2))
+        beds = int(data_json.get("beds", 2))
         bathrooms = float(data_json.get("bathrooms", 2.0))
+        amenities = int(data_json.get("amenities", 20))
         bed_type = data_json.get("bed_type", "Real Bed")
         cancellation_policy = data_json.get("cancellation_policy", "flexible")
-        
+
+        # ==========================================
+        # RIGOROUS REAL-WORLD VALIDATION BOUNDS
+        # ==========================================
+        validation_errors = []
+
+        # 1. Capacity vs Beds constraint
+        if accommodates > (beds * 2):
+            validation_errors.append(
+                f"Guest capacity ({accommodates}) exceeds maximum realistic capacity for {beds} bed(s). Max allowed is {beds * 2} guests (2 per bed)."
+            )
+
+        # 2. Bed vs Bedroom sanity
+        if bedrooms > 0 and beds < bedrooms:
+            validation_errors.append(
+                f"Number of beds ({beds}) cannot be less than number of bedrooms ({bedrooms})."
+            )
+
+        # 3. Bathroom sanity
+        if bathrooms > (bedrooms + 2):
+            validation_errors.append(
+                f"Bathrooms ({bathrooms}) is unrealistic for {bedrooms} bedroom(s). Max allowed is {bedrooms + 2}."
+            )
+
+        # 4. Property type specific thresholds
+        type_constraints = PROPERTY_CONSTRAINTS.get(property_type)
+        if type_constraints:
+            if accommodates > type_constraints["max_guests"]:
+                validation_errors.append(
+                    f"{property_type} cannot accommodate more than {type_constraints['max_guests']} guests (provided {accommodates})."
+                )
+            if beds > type_constraints["max_beds"]:
+                validation_errors.append(
+                    f"{property_type} cannot have more than {type_constraints['max_beds']} beds (provided {beds})."
+                )
+            if bedrooms > type_constraints["max_bedrooms"]:
+                validation_errors.append(
+                    f"{property_type} cannot have more than {type_constraints['max_bedrooms']} bedrooms (provided {bedrooms})."
+                )
+            if bathrooms > type_constraints["max_baths"]:
+                validation_errors.append(
+                    f"{property_type} cannot have more than {type_constraints['max_baths']} bathrooms (provided {bathrooms})."
+                )
+
+        if validation_errors:
+            return jsonify({
+                "success": False,
+                "error": "Validation failed: " + " | ".join(validation_errors),
+                "validation_errors": validation_errors
+            }), 422
+
         raw_clean = data_json.get("cleaning_fee", True)
         cleaning_fee = bool(raw_clean) if not isinstance(raw_clean, str) else raw_clean.lower() in ("true", "1", "yes")
-        
+
         raw_profile_pic = data_json.get("host_has_profile_pic", "t")
         host_has_profile_pic = "t" if str(raw_profile_pic).lower() in ("t", "true", "1", "yes") else "f"
-        
+
         raw_verified = data_json.get("host_identity_verified", "t")
         host_identity_verified = "t" if str(raw_verified).lower() in ("t", "true", "1", "yes") else "f"
-        
+
         host_response_rate = float(data_json.get("host_response_rate", 100))
-        
+
         raw_instant = data_json.get("instant_bookable", "t")
         instant_bookable = "t" if str(raw_instant).lower() in ("t", "true", "1", "yes") else "f"
-        
+
         latitude = float(data_json.get("latitude", default_coords["lat"]))
         longitude = float(data_json.get("longitude", default_coords["long"]))
         number_of_reviews = int(data_json.get("number_of_reviews", 30))
         review_scores_rating = float(data_json.get("review_scores_rating", 95))
-        bedrooms = int(data_json.get("bedrooms", 2))
-        beds = int(data_json.get("beds", 2))
-        
-        # Feature 2 parameters: Seasonality & Weekend Surge
-        season = data_json.get("season", "regular").lower()  # 'regular', 'peak', 'monsoon'
+
+        season = data_json.get("season", "regular").lower()
         raw_weekend = data_json.get("is_weekend", False)
         is_weekend = bool(raw_weekend) if not isinstance(raw_weekend, str) else raw_weekend.lower() in ("true", "1", "yes")
         locality_name = data_json.get("locality", "")
@@ -167,65 +312,23 @@ def predict():
         raw_pred = predict_pipeline.predict(df)
         base_nightly_price = round(float(np.exp(raw_pred[0])), 0)
 
-        # Feature 2 Calculation: Multipliers
-        season_multiplier = 1.35 if season == "peak" else (0.80 if season == "monsoon" else 1.00)
-        weekend_multiplier = 1.15 if is_weekend else 1.00
-        combined_multiplier = round(season_multiplier * weekend_multiplier, 3)
-
-        dynamic_nightly_price = round(base_nightly_price * combined_multiplier, 0)
-
-        # Feature 4: Market Strategy & Confidence Range (Min, Median, Max)
-        budget_price = round(dynamic_nightly_price * 0.85, 0)       # 90%+ target occupancy
-        recommended_price = dynamic_nightly_price                    # Optimal ML sweet spot
-        premium_price = round(dynamic_nightly_price * 1.22, 0)      # High margin / peak yield
-
-        # Realistic Financial & Host Take-Home Breakdown
-        cleaning_fee_suggested = round(max(500.0, dynamic_nightly_price * 0.12), 0) if cleaning_fee else 0.0
-        platform_fee_3pct = round(dynamic_nightly_price * 0.03, 0)
-        net_host_takehome_nightly = dynamic_nightly_price - platform_fee_3pct
-
-        occupancy_rate = 0.84 if season == "peak" else (0.58 if season == "monsoon" else 0.72)
-        weekly_inr = round(dynamic_nightly_price * 7 * (0.90 if not is_weekend else 0.95), 0)
-        monthly_inr = round(dynamic_nightly_price * 30 * occupancy_rate, 0)
-
-        # Market Demand Tier
-        if dynamic_nightly_price > 12000:
-            demand_tier = "💎 Super-Luxury Signature"
-        elif dynamic_nightly_price > 6000:
-            demand_tier = "🔥 Prime High-Yield Category"
-        elif dynamic_nightly_price > 3000:
-            demand_tier = "⭐ High-Demand Sweet Spot"
-        else:
-            demand_tier = "🏷️ Value / High-Occupancy Tier"
+        # Clean transparent price output
+        platform_fee_pct = 0.03
+        platform_fee_amount = round(base_nightly_price * platform_fee_pct, 0)
+        net_host_takehome_nightly = base_nightly_price - platform_fee_amount
 
         return jsonify({
             "success": True,
             "currency": "INR",
             "currency_symbol": "₹",
-            "base_nightly_price": base_nightly_price,
-            "predicted_nightly_price": dynamic_nightly_price,
-            "season": season,
-            "season_multiplier": season_multiplier,
-            "is_weekend": is_weekend,
-            "weekend_multiplier": weekend_multiplier,
-            "combined_multiplier": combined_multiplier,
-            "market_range": {
-                "budget": budget_price,
-                "recommended": recommended_price,
-                "premium": premium_price
-            },
+            "predicted_nightly_price": base_nightly_price,
             "financial_breakdown": {
-                "gross_nightly": dynamic_nightly_price,
-                "cleaning_fee_suggested": cleaning_fee_suggested,
-                "airbnb_service_fee_3pct": platform_fee_3pct,
-                "net_host_takehome_nightly": net_host_takehome_nightly,
-                "expected_occupancy_pct": round(occupancy_rate * 100, 1)
+                "gross_nightly": base_nightly_price,
+                "platform_service_fee": platform_fee_amount,
+                "platform_service_fee_pct": 3.0,
+                "net_host_takehome_nightly": net_host_takehome_nightly
             },
-            "weekly_estimate": weekly_inr,
-            "monthly_estimate": monthly_inr,
-            "cleaning_fee_suggested": cleaning_fee_suggested,
-            "demand_tier": demand_tier,
-            "details": {
+            "property_summary": {
                 "city": city,
                 "locality": locality_name,
                 "property_type": property_type,
@@ -233,7 +336,8 @@ def predict():
                 "accommodates": accommodates,
                 "bedrooms": bedrooms,
                 "beds": beds,
-                "bathrooms": bathrooms
+                "bathrooms": bathrooms,
+                "amenities_count": amenities
             }
         })
     except Exception as e:
@@ -244,4 +348,3 @@ def predict():
 
 if __name__ == '__main__':
     app.run(host="127.0.0.1", port=5000, debug=True)
-

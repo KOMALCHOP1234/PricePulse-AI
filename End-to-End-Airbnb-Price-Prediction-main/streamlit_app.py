@@ -61,7 +61,8 @@ FEAT_COLS = ["property_type","room_type","amenities","accommodates","bathrooms",
 FEAT_LABELS = ["Amenities","Accommodates","Bathrooms","Latitude","Longitude",
                "Response Rate","Num Reviews","Review Score","Bedrooms","Beds",
                "Property Type","Room Type","Bed Type","Cancellation",
-               "Cleaning Fee","City","Identity Verified","Instant Bookable","Profile Pic"]CITIES = {
+               "Cleaning Fee","City","Identity Verified","Instant Bookable","Profile Pic"]
+CITIES = {
     "Goa": {
         "lat": 15.2993, "long": 74.1240, "emoji": "🏖", "desc": "Beachfront and Coastal Villas",
         "localities": [
@@ -178,8 +179,8 @@ with st.spinner("Loading PricePulse AI..."):
 
 # Hero
 st.markdown("""<div class="hero">
-  <h1>💰 PricePulse AI &mdash; Intelligent Dynamic Pricing</h1>
-  <p>End-to-end Revenue Optimization System &mdash; 30,000 Indian Airbnb listings &middot; 3-Model Comparison &middot; CatBoost R&sup2; = 0.977</p>
+  <h1>💰 PricePulse AI &mdash; Rental Price Prediction Engine</h1>
+  <p>End-to-end Revenue Optimization System &mdash; 30,000 Indian Property Listings &middot; 3-Model Comparison &middot; CatBoost R&sup2; = 0.977</p>
 </div>""", unsafe_allow_html=True)
 
 # Sidebar
@@ -214,11 +215,22 @@ with st.sidebar:
     room_type     = st.selectbox("Room Type", ROOM_TYPES)
     c1, c2 = st.columns(2)
     with c1:
-        bedrooms = st.number_input("Bedrooms", 0, 20, 2)
-        beds     = st.number_input("Beds", 1, 30, 2)
+        bedrooms = st.number_input("Bedrooms", 0, 15, 2)
+        beds     = st.number_input("Beds", 1, 25, 2)
     with c2:
-        bathrooms    = st.number_input("Bathrooms", 0.0, 20.0, 1.0, 0.5)
+        bathrooms    = st.number_input("Bathrooms", 0.5, 15.0, 2.0, 0.5)
         accommodates = st.number_input("Guests", 1, 30, 4)
+
+    # Physical threshold validation bounds
+    val_warnings = []
+    if accommodates > (beds * 2):
+        val_warnings.append(f"⚠️ Guests ({accommodates}) exceeds capacity for {beds} bed(s) (Max {beds * 2}).")
+    if bedrooms > 0 and beds < bedrooms:
+        val_warnings.append(f"⚠️ Beds ({beds}) cannot be less than bedrooms ({bedrooms}).")
+    if bathrooms > (bedrooms + 2):
+        val_warnings.append(f"⚠️ Bathrooms ({bathrooms}) is high for {bedrooms} bedroom(s).")
+    for w in val_warnings:
+        st.warning(w)
     amenities     = st.slider("Amenities", 0, 60, 20)
     bed_type      = st.selectbox("Bed Type", BED_TYPES)
     cancel_policy = st.selectbox("Cancellation Policy", CANCEL_POL)
@@ -271,14 +283,7 @@ with tab1:
                     base_price   = run_pred()
                     dynamic_price = round(base_price * combined_mult, 0)
                     
-                    # Feature 4: Market Strategy Band & Host Financial Ledger
-                    budget_price = round(dynamic_price * 0.85, 0)
-                    premium_price = round(dynamic_price * 1.22, 0)
-                    
-                    weekly_occ   = 0.95 if is_weekend else 0.90
-                    monthly_occ  = 0.84 if "Peak" in season_opt else (0.58 if "Monsoon" in season_opt else 0.72)
-                    weekly       = round(dynamic_price * 7 * weekly_occ, 0)
-                    monthly      = round(dynamic_price * 30 * monthly_occ, 0)
+                    # Transparent Host Financial Ledger
                     cfee         = round(max(500.0, dynamic_price * 0.12), 0) if cleaning_fee else 0.0
                     service_fee  = round(dynamic_price * 0.03, 0)
                     net_takehome = dynamic_price - service_fee
@@ -296,36 +301,14 @@ with tab1:
 
                     st.markdown("<br>", unsafe_allow_html=True)
                     
-                    # Feature 4.1: Market Strategy Band
-                    st.markdown("#### 🎯 Market Strategy & Confidence Band (Min – Max)")
-                    b1, b2, b3 = st.columns(3)
-                    with b1:
-                        st.markdown(f"""<div class="card" style="border-top:3px solid #6b7280">
-                          <div class="lbl">Budget Fill (85%)</div>
-                          <div class="val" style="color:#9ca3af!important;font-size:1.35rem">&#8377;{budget_price:,.0f}</div>
-                          <div class="sub">Target: 90%+ Occupancy</div>
-                        </div>""", unsafe_allow_html=True)
-                    with b2:
-                        st.markdown(f"""<div class="card" style="border-top:3px solid #ff5a5f;background:#241d20">
-                          <div class="lbl" style="color:#ff5a5f!important">AI Sweet Spot</div>
-                          <div class="val" style="color:#ff5a5f!important;font-size:1.35rem">&#8377;{dynamic_price:,.0f}</div>
-                          <div class="sub" style="color:#e5e7eb!important">Optimal Max Revenue</div>
-                        </div>""", unsafe_allow_html=True)
-                    with b3:
-                        st.markdown(f"""<div class="card" style="border-top:3px solid #22c55e">
-                          <div class="lbl">Premium Yield (122%)</div>
-                          <div class="val" style="color:#22c55e!important;font-size:1.35rem">&#8377;{premium_price:,.0f}</div>
-                          <div class="sub">High-Margin Peak</div>
-                        </div>""", unsafe_allow_html=True)
 
-                    st.markdown("<br>", unsafe_allow_html=True)
 
                     # Feature 4.2: Host Financial Ledger
                     st.markdown("#### 📋 Host Net Payout Ledger (Per Night)")
                     l1, l2, l3, l4 = st.columns(4)
                     for col, lbl, val, sub in zip(
                         [l1, l2, l3, l4],
-                        ["Guest Nightly Tariff", "Cleaning Fee", "Airbnb Fee (3%)", "Net Host Payout"],
+                        ["Guest Nightly Tariff", "Cleaning Fee", "Platform Fee (3%)", "Net Host Payout"],
                         [f"&#8377;{dynamic_price:,.0f}", f"&#8377;{cfee:,.0f}", f"-&#8377;{service_fee:,.0f}", f"&#8377;{net_takehome:,.0f}"],
                         ["gross charged", "turnover fee", "platform deduction", "your take-home"]):
                         with col:
@@ -337,20 +320,7 @@ with tab1:
 
                     st.markdown("<br>", unsafe_allow_html=True)
                     
-                    # Projections
-                    k1, k2, k3 = st.columns(3)
-                    for col, lbl, val, sub in zip(
-                        [k1, k2, k3],
-                        ["Weekly Projected", "Monthly Projected", "Forecasted Occupancy"],
-                        [f"&#8377;{weekly:,.0f}", f"&#8377;{monthly:,.0f}", f"{monthly_occ*100:.0f}% Rate"],
-                        ["~7 days forecast", f"at {monthly_occ*100:.0f}% occupancy", f"in {season_opt.split()[0]}"]):
-                        with col:
-                            st.markdown(
-                                f'<div class="card"><div class="lbl">{lbl}</div>'
-                                f'<div class="val" style="font-size:1.35rem">{val}</div><div class="sub">{sub}</div></div>',
-                                unsafe_allow_html=True)
 
-                    st.markdown("<br>", unsafe_allow_html=True)
                     st.markdown("**🛏 Bedroom Sensitivity Analysis**")
                     bed_range  = list(range(1, 7))
                     bed_prices = [round(run_pred(br=b) * combined_mult, 0) for b in bed_range]
@@ -567,7 +537,7 @@ with tab3:
 # ═══════════════════════════════════════════════════════════════════
 with tab4:
     st.markdown("### 🏙 Market Insights Dashboard")
-    st.caption("Aggregated from 30,000 real Indian Airbnb listings")
+    st.caption("Aggregated from 30,000 real Indian Property Listings")
 
     i1, i2, i3, i4 = st.columns(4)
     for col, lbl, val, sub in zip(

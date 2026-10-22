@@ -259,6 +259,8 @@ export default function App() {
 
   const [selectedPreset, setSelectedPreset] = useState("Goa Beach Villa");
   const [apiError, setApiError] = useState(null);
+  const [liveFeatureImportances, setLiveFeatureImportances] = useState([]);
+  const [validationWarning, setValidationWarning] = useState(null);
 
   const handleCitySelect = (cityName) => {
     const cityData = INDIAN_CITIES[cityName];
@@ -295,7 +297,30 @@ export default function App() {
     }));
   };
 
+  // Client-side physical threshold validation
+  const validateForm = () => {
+    if (formData.accommodates > (formData.beds * 2)) {
+      return `Capacity check: ${formData.accommodates} guests exceeds maximum capacity for ${formData.beds} bed(s) (Max ${formData.beds * 2} guests).`;
+    }
+    if (formData.bedrooms > 0 && formData.beds < formData.bedrooms) {
+      return `Configuration check: Beds (${formData.beds}) cannot be less than bedrooms (${formData.bedrooms}).`;
+    }
+    if (formData.bathrooms > (formData.bedrooms + 2)) {
+      return `Sanity check: Bathrooms (${formData.bathrooms}) is unusually high for ${formData.bedrooms} bedroom(s).`;
+    }
+    return null;
+  };
+
   const runPrediction = async () => {
+    const errorMsg = validateForm();
+    if (errorMsg) {
+      setValidationWarning(errorMsg);
+      setApiError(errorMsg);
+      return;
+    } else {
+      setValidationWarning(null);
+    }
+
     setLoading(true);
     setApiError(null);
     try {
@@ -344,6 +369,16 @@ export default function App() {
 
   useEffect(() => {
     runPrediction();
+
+    // Fetch real CatBoost model feature importances from Flask API
+    fetch("http://127.0.0.1:5000/api/feature_importance")
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.features) {
+          setLiveFeatureImportances(data.features);
+        }
+      })
+      .catch(err => console.log("Feature importance API offline:", err));
   }, []);
 
   const currentCityData = INDIAN_CITIES[formData.city] || INDIAN_CITIES["Goa"];
@@ -404,7 +439,7 @@ export default function App() {
           <div>
             <div className="hero-compact">
               <div>
-                <h1>Indian Airbnb Dynamic Revenue Engine</h1>
+                <h1>Short-Term Rental Dynamic Pricing Engine</h1>
                 <p>Simulate pricing with seasonal multipliers, micro-neighborhood intelligence, and market confidence tiers.</p>
               </div>
               <div style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
@@ -890,37 +925,26 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Market Strategy Band */}
-                <div className="strategy-band">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {/* Validated Valuation Summary */}
+                <div style={{
+                  background: '#F8FAFC', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                  padding: '14px', marginBottom: '14px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--dark)' }}>
-                      Market Strategy Spread
+                      ML Valuation Breakdown
                     </span>
-                    <span style={{ fontSize: '0.68rem', color: '#059669', fontWeight: 700 }}>
-                      ±18% Confidence Band
+                    <span style={{ fontSize: '0.72rem', color: '#059669', fontWeight: 700, background: '#ECFDF5', padding: '2px 8px', borderRadius: '4px' }}>
+                      Validated Sanity Bounds
                     </span>
                   </div>
-
-                  <div className="strategy-grid">
-                    <div className="strategy-col">
-                      <div className="strategy-name">Budget Fill</div>
-                      <div className="strategy-val">₹{prediction.market_range.budget.toLocaleString('en-IN')}</div>
-                      <div className="strategy-sub">90%+ Occupancy</div>
-                    </div>
-
-                    <div className="strategy-col active">
-                      <div className="strategy-name">Sweet Spot</div>
-                      <div className="strategy-val" style={{ color: 'var(--primary)' }}>
-                        ₹{prediction.market_range.recommended.toLocaleString('en-IN')}
-                      </div>
-                      <div className="strategy-sub">Max Profit</div>
-                    </div>
-
-                    <div className="strategy-col">
-                      <div className="strategy-name">Peak Yield</div>
-                      <div className="strategy-val">₹{prediction.market_range.premium.toLocaleString('en-IN')}</div>
-                      <div className="strategy-sub">High Margin</div>
-                    </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: 'var(--muted)', marginTop: '4px' }}>
+                    <span>Property Capacity</span>
+                    <strong style={{ color: 'var(--dark)' }}>{formData.accommodates} Guests · {formData.bedrooms} BR · {formData.beds} Beds</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: 'var(--muted)', marginTop: '4px' }}>
+                    <span>Bathrooms Ratio</span>
+                    <strong style={{ color: 'var(--dark)' }}>{formData.bathrooms} Baths</strong>
                   </div>
                 </div>
 
@@ -942,7 +966,7 @@ export default function App() {
                     <span>+₹{prediction.cleaning.toLocaleString('en-IN')}</span>
                   </div>
                   <div className="ledger-row">
-                    <span>Airbnb Fee (3%)</span>
+                    <span>Platform Fee (3%)</span>
                     <span style={{ color: '#EF4444' }}>-₹{prediction.service_fee.toLocaleString('en-IN')}</span>
                   </div>
 
@@ -951,32 +975,10 @@ export default function App() {
                     <span>₹{prediction.net_takehome.toLocaleString('en-IN')}</span>
                   </div>
 
-                  <div style={{ marginTop: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--muted)' }}>
-                      <span>Forecasted Occupancy</span>
-                      <span style={{ fontWeight: 700, color: '#059669' }}>{prediction.occupancy_pct}% Rate</span>
-                    </div>
-                    <div className="occupancy-meter-bar">
-                      <div className="occupancy-meter-fill" style={{ width: `${prediction.occupancy_pct}%` }}></div>
-                    </div>
-                  </div>
+
                 </div>
 
-                {/* Projections */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <div style={{ background: '#F8FAFC', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase' }}>Weekly Est.</span>
-                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--dark)', marginTop: '2px' }}>
-                      ₹{prediction.weekly.toLocaleString('en-IN')}
-                    </div>
-                  </div>
-                  <div style={{ background: '#F8FAFC', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase' }}>Monthly Est.</span>
-                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--dark)', marginTop: '2px' }}>
-                      ₹{prediction.monthly.toLocaleString('en-IN')}
-                    </div>
-                  </div>
-                </div>
+
 
                 <button className="btn-predict" disabled={loading} onClick={runPrediction}>
                   {loading ? (
@@ -1129,23 +1131,34 @@ export default function App() {
                 🔥 Feature Importance Analysis
               </h2>
               <p style={{ color: 'var(--muted)', fontSize: '0.86rem', marginTop: '4px' }}>
-                CatBoost built-in feature importance scores displaying which property attributes drive Airbnb prices most.
+                CatBoost built-in feature importance scores displaying which property attributes drive rental prices most.
               </p>
             </div>
 
-            {/* Horizontal Bar Chart */}
+            {/* Live Model Feature Importance Bar Chart */}
             <div style={{ background: '#F8FAFC', padding: '20px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
-              {FEATURE_IMPORTANCES.map((item) => (
-                <div key={item.feature} style={{ marginBottom: '12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem', marginBottom: '4px' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--dark)' }}>{item.feature}</span>
-                    <strong style={{ color: item.color }}>{item.score}%</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--dark)' }}>
+                  Live CatBoost Model Feature Weights ({liveFeatureImportances.length > 0 ? 'Connected to API' : 'Static Fallback'})
+                </span>
+                <span className="brand-badge">Tree-Based Importance</span>
+              </div>
+              {(liveFeatureImportances.length > 0 ? liveFeatureImportances : FEATURE_IMPORTANCES.map(f => ({ label: f.feature, importance: f.score }))).map((item, idx) => {
+                const maxImp = liveFeatureImportances.length > 0 ? Math.max(...liveFeatureImportances.map(x => x.importance)) : 50;
+                const barWidth = Math.max(2, (item.importance / (maxImp || 1)) * 100);
+                const color = idx === 0 ? '#10B981' : (idx < 3 ? '#FF385C' : (idx < 6 ? '#FB923C' : '#64748B'));
+                return (
+                  <div key={item.label || item.feature} style={{ marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem', marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--dark)' }}>{item.label || item.feature}</span>
+                      <strong style={{ color }}>{Number(item.importance).toFixed(2)}%</strong>
+                    </div>
+                    <div style={{ width: '100%', height: '9px', background: '#E2E8F0', borderRadius: '9999px', overflow: 'hidden' }}>
+                      <div style={{ width: `${barWidth}%`, height: '100%', background: color, borderRadius: '9999px', transition: 'width 0.4s ease' }}></div>
+                    </div>
                   </div>
-                  <div style={{ width: '100%', height: '9px', background: '#E2E8F0', borderRadius: '9999px', overflow: 'hidden' }}>
-                    <div style={{ width: `${(item.score / 28) * 100}%`, height: '100%', background: item.color, borderRadius: '9999px' }}></div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Insights Cards */}

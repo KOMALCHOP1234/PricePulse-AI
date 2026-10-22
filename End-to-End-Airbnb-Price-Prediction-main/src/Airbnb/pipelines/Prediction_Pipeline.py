@@ -13,8 +13,10 @@ class PredictPipeline:
     
     def predict(self, features):
         try:
-            preprocessor_path = os.path.join("Artifacts", "Preprocessor.pkl")
-            model_path = os.path.join("Artifacts", "Model.pkl")
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            artifacts_dir = os.path.join(base_dir, "Artifacts")
+            preprocessor_path = os.path.join(artifacts_dir, "Preprocessor.pkl")
+            model_path = os.path.join(artifacts_dir, "Model.pkl")
             preprocessor = load_object(preprocessor_path)
             model = load_object(model_path)
             logging.info('Preprocessor and Model Pickle files loaded')
